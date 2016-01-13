@@ -108,6 +108,8 @@ class YamahaWorkaround(BaseWorkaround):
         self.server_mode_zone = None
         self.server_mode_source = None
 
+        self.state = None
+
         try:
             # Initialize YamahaRemoteControl interface
             if (not self._detect_remotecontrolinterface(xml)):
@@ -336,6 +338,51 @@ class YamahaWorkaround(BaseWorkaround):
 
         return zones, sources
 
+
+    def _store_state(self, override=False, zone=None):
+        if (not zone):
+            zone = self.server_mode_zone
+        if (self.state and not override):
+            return
+        self.state = {
+            'power': self._power(),
+            'source': self._source(),
+        }
+
+    def _restore_state(self, removeState=True, zone=None):
+        if (not zone):
+            zone = self.server_mode_zone
+        self._set_source(self.state['source'])
+        self._set_power(self.state['power'])
+        if (not removeState):
+            return
+        self.state = None
+
+
+    def _power(self, zone=None):
+        if (not zone):
+            zone = self.server_mode_zone
+        xml_response = self._get(zone, self.YRC_BASEPATH_BASICSTATUS,
+            self.YRC_CMD_GETPARAM, self.YRC_BASEPATH_POWER)
+        if (xml_response is None):
+            return None
+        return True if xml_response.text == self.YRC_VALUE_POWER_ON else False
+
+    def _set_power(self, value, zone=None):
+        if (not zone):
+            zone = self.server_mode_zone
+        self._put(zone, self.YRC_BASEPATH_POWER,
+            self.YRC_VALUE_POWER_ON if value else self.YRC_VALUE_POWER_OFF)
+
+    def _source(self, zone=None):
+        if (not zone):
+            zone = self.server_mode_zone
+        xml_response = self._get(zone, self.YRC_BASEPATH_BASICSTATUS,
+            self.YRC_CMD_GETPARAM, self.YRC_BASEPATH_SOURCE)
+        if (xml_response is None):
+            return None
+        return xml_response.text
+
     def _set_source(self, value, zone=None):
         if (not zone):
             zone = self.server_mode_zone
@@ -344,5 +391,14 @@ class YamahaWorkaround(BaseWorkaround):
     def before_play(self):
         if (not self.enabled):
             return
+        logger.info('Storing receiver state')
+        self._store_state()
         logger.info('Switching to UPnP server mode')
+        self._set_power(True)
         self._set_source(self.server_mode_source)
+
+    def after_stop(self):
+        if (not self.enabled):
+            return
+        logger.info('Restoring receiver state')
+        self._restore_state()
